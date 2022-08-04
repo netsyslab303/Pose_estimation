@@ -1,3 +1,8 @@
+#Download data and model
+Download url : https://1drv.ms/u/s!AhekKfC_JseEg5hGyWzW7K2Z5qberQ?e=CAmMRD
+
+※ data, model 폴더에 다운로드 받은 파일 넣기
+
 # PYSKL
 
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/revisiting-skeleton-based-action-recognition/skeleton-based-action-recognition-on-ntu-rgbd)](https://paperswithcode.com/sota/skeleton-based-action-recognition-on-ntu-rgbd?p=revisiting-skeleton-based-action-recognition) [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/pyskl-towards-good-practices-for-skeleton/skeleton-based-action-recognition-on-ntu-rgbd-1)](https://paperswithcode.com/sota/skeleton-based-action-recognition-on-ntu-rgbd-1?p=pyskl-towards-good-practices-for-skeleton) [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/revisiting-skeleton-based-action-recognition/skeleton-based-action-recognition-on-kinetics)](https://paperswithcode.com/sota/skeleton-based-action-recognition-on-kinetics?p=revisiting-skeleton-based-action-recognition)
