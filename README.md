@@ -2,7 +2,8 @@
 
 Download url : https://1drv.ms/u/s!AhekKfC_JseEg5hGyWzW7K2Z5qberQ?e=CAmMRD
 
-※ Pose_estimation 위치에 data, model 폴더 만들고 다운로드 받은 파일 넣기
+1. Pose_estimation 위치에 data, model 폴더 만들기
+2. 다운로드 받은 파일을 각 폴더에 넣기
 
 # PYSKL
 
