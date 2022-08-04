@@ -171,6 +171,7 @@ def inference_recognizer(model, video, outputs=None, as_tensor=True, **kwargs):
     # forward the model
     with OutputHook(model, outputs=outputs, as_tensor=as_tensor) as h:
         with torch.no_grad():
+            model.person = False
             scores = model(return_loss=False, **data)[0]
         returned_features = h.layer_outputs if outputs else None
 
