@@ -111,11 +111,13 @@ class SimpleHead(BaseHead):
                 pool = nn.AdaptiveAvgPool2d(1)
                 N, M, C, T, V = x.shape
                 x = x.reshape(N * M, C, T, V)
+
+                x = pool(x)
+                x = x.reshape(N, M, C)
+
                 for i in range(m):
-                    tmp = x[i]
-                    tmp = pool(tmp)
-                    tmp = tmp.reshape(N, 1, C)
-                    tmp = tmp.mean(dim=1)
+                    tmp = x[0][i]
+                    tmp = tmp.reshape(N, C)
                     cls_score = self.fc_cls(tmp)
                     output.append(cls_score.argmax())
         # assert x.shape[1] == self.in_c
