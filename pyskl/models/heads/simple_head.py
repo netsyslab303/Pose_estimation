@@ -88,6 +88,7 @@ class SimpleHead(BaseHead):
                 x = x.mean(dim=1)
 
         assert x.shape[1] == self.in_c
+
         if self.dropout is not None:
             x = self.dropout(x)
 
@@ -112,14 +113,16 @@ class SimpleHead(BaseHead):
                 N, M, C, T, V = x.shape
                 x = x.reshape(N * M, C, T, V)
 
-                x = pool(x)
-                x = x.reshape(N, M, C)
+                #x = pool(x)
+                #x = x.reshape(N, M, C)
 
                 for i in range(m):
-                    tmp = x[0][i]
-                    tmp = tmp.reshape(N, C)
+                    tmp = x[i]
+                    tmp = pool(tmp)
+                    tmp = tmp.reshape(N, 1, C)
+                    tmp = tmp.mean(dim=1)
                     cls_score = self.fc_cls(tmp)
-                    output.append(cls_score.argmax())
+                    output.append(cls_score)
         # assert x.shape[1] == self.in_c
         # if self.dropout is not None:
         #     x = self.dropout(x)

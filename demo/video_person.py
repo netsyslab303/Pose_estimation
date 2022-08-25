@@ -10,8 +10,9 @@ import mmcv
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment
+from operator import itemgetter
 
-from pyskl.apis import inference_recognizer, init_recognizer
+from pyskl.apis import inference_recognizer, init_recognizer, inference_recognizer_person
 
 try:
     from mmdet.apis import inference_detector, init_detector
@@ -62,26 +63,26 @@ def parse_args():
     parser.add_argument('out_filename', help='output filename')
     parser.add_argument(
         '--config',
-        default='configs/posec3d/slowonly_r50_ntu120_xsub/joint.py',
+        default='../configs/stgcn++/one_person/inference.py',
         help='skeleton action recognition config file path')
     parser.add_argument(
         '--checkpoint',
-        default=('https://download.openmmlab.com/mmaction/pyskl/ckpt/'
-                 'posec3d/slowonly_r50_ntu120_xsub/joint.pth'),
+        default=('../work_dirs/stgcn++/ai_plus_ntu_one_person_f300/epoch_16.pth'),
         help='skeleton action recognition checkpoint file/url')
     parser.add_argument(
         '--det-config',
-        default='demo/faster_rcnn_r50_fpn_2x_coco.py',
+        default='faster_rcnn_r50_fpn_2x_coco.py',
         help='human detection config file path (from mmdet)')
     parser.add_argument(
         '--det-checkpoint',
         default=('http://download.openmmlab.com/mmdetection/v2.0/faster_rcnn/'
-                 'faster_rcnn_r50_fpn_2x_coco/faster_rcnn_r50_fpn_2x_coco_'
+                 'faster_rcnn_r50_fpn_2x_coco/'
+                 'faster_rcnn_r50_fpn_2x_coco_'
                  'bbox_mAP-0.384_20200504_210434-a5d8aa15.pth'),
         help='human detection checkpoint file/url')
     parser.add_argument(
         '--pose-config',
-        default='demo/hrnet_w32_coco_256x192.py',
+        default='hrnet_w32_coco_256x192.py',
         help='human pose estimation config file path (from mmpose)')
     parser.add_argument(
         '--pose-checkpoint',
@@ -95,7 +96,7 @@ def parse_args():
         help='the threshold of human detection score')
     parser.add_argument(
         '--label-map',
-        default='tools/data/label_map/nturgbd_120.txt',
+        default='../tools/data/label_map/ai_plus_ntu_runx_label.txt',
         help='label map file')
     parser.add_argument(
         '--device', type=str, default='cuda:0', help='CPU/CUDA device option')
@@ -229,82 +230,107 @@ def pose_tracking(pose_results, max_tracks=2, thre=30):
 def main():
     args = parse_args()
 
-    frame_paths, original_frames = frame_extraction(args.video,
-                                                    args.short_side)
-    num_frame = len(frame_paths)
-    h, w, _ = original_frames[0].shape
+    video_list = os.listdir(args.video)
+    output_list = os.listdir(args.out_filename)
+    output_dir = args.out_filename.split('/')[1]
 
-    config = mmcv.Config.fromfile(args.config)
-    config.data.test.pipeline = [x for x in config.data.test.pipeline if x['type'] != 'DecompressPose']
-    # Are we using GCN for Infernece?
-    GCN_flag = 'GCN' in config.model.type
-    GCN_nperson = None
-    if GCN_flag:
-        format_op = [op for op in config.data.test.pipeline if op['type'] == 'FormatGCNInput'][0]
-        GCN_nperson = format_op['num_person']
+    for video in video_list:
 
-    model = init_recognizer(config, args.checkpoint, args.device)
+        if video[-4] != '.':
+            continue
+        video_name = video[:-4]
+        if '{}_'.format(output_dir)+video_name+'.mp4' in output_list:
+            continue
+        print("processing {}".format(video_name))
+        frame_paths, original_frames = frame_extraction(args.video+video,
+                                                        args.short_side)
+        num_frame = len(frame_paths)
+        h, w, _ = original_frames[0].shape
 
-    # Load label_map
-    label_map = [x.strip() for x in open(args.label_map).readlines()]
+        config = mmcv.Config.fromfile(args.config)
+        config.data.test.pipeline = [x for x in config.data.test.pipeline if x['type'] != 'DecompressPose']
+        # Are we using GCN for Infernece?
+        GCN_flag = False #'GCN' in config.model.type
+        GCN_nperson = None
+        '''if GCN_flag:
+            format_op = [op for op in config.data.test.pipeline if op['type'] == 'FormatGCNInput'][0]
+            GCN_nperson = format_op['num_person']
+        '''
+        model = init_recognizer(config, args.checkpoint, args.device)
 
-    # Get Human detection results
-    det_results = detection_inference(args, frame_paths)
-    torch.cuda.empty_cache()
+        # Load label_map
+        label_map = [x.strip() for x in open(args.label_map).readlines()]
 
-    pose_results = pose_inference(args, frame_paths, det_results)
-    torch.cuda.empty_cache()
+        # Get Human detection results
+        det_results = detection_inference(args, frame_paths)
+        torch.cuda.empty_cache()
 
-    fake_anno = dict(
-        frame_dir='',
-        label=-1,
-        img_shape=(h, w),
-        original_shape=(h, w),
-        start_index=0,
-        modality='Pose',
-        total_frames=num_frame)
+        pose_results = pose_inference(args, frame_paths, det_results)
+        torch.cuda.empty_cache()
 
-    if GCN_flag:
-        # We will keep at most `GCN_nperson` persons per frame.
-        tracking_inputs = [[pose['keypoints'] for pose in poses] for poses in pose_results]
-        keypoint, keypoint_score = pose_tracking(tracking_inputs, max_tracks=GCN_nperson)
-        fake_anno['keypoint'] = keypoint
-        fake_anno['keypoint_score'] = keypoint_score
-    else:
-        num_person = max([len(x) for x in pose_results])
-        # Current PoseC3D models are trained on COCO-keypoints (17 keypoints)
-        num_keypoint = 17
-        keypoint = np.zeros((num_person, num_frame, num_keypoint, 2),
-                            dtype=np.float16)
-        keypoint_score = np.zeros((num_person, num_frame, num_keypoint),
-                                  dtype=np.float16)
-        for i, poses in enumerate(pose_results):
-            for j, pose in enumerate(poses):
-                pose = pose['keypoints']
-                keypoint[j, i] = pose[:, :2]
-                keypoint_score[j, i] = pose[:, 2]
-        fake_anno['keypoint'] = keypoint
-        fake_anno['keypoint_score'] = keypoint_score
+        fake_anno = dict(
+            frame_dir='',
+            label=-1,
+            img_shape=(h, w),
+            original_shape=(h, w),
+            start_index=0,
+            modality='Pose',
+            total_frames=num_frame)
 
-    results = inference_recognizer(model, fake_anno)
+        if GCN_flag:
+            # We will keep at most `GCN_nperson` persons per frame.
+            GCN_nperson = max([len(x) for x in pose_results])
+            tracking_inputs = [[pose['keypoints'] for pose in poses] for poses in pose_results]
+            keypoint, keypoint_score = pose_tracking(tracking_inputs, max_tracks=GCN_nperson)
+            fake_anno['keypoint'] = keypoint
+            fake_anno['keypoint_score'] = keypoint_score
+        else:
+            num_person = max([len(x) for x in pose_results])
+            # Current PoseC3D models are trained on COCO-keypoints (17 keypoints)
+            num_keypoint = 17
+            keypoint = np.zeros((num_person, num_frame, num_keypoint, 2),
+                                dtype=np.float16)
+            keypoint_score = np.zeros((num_person, num_frame, num_keypoint),
+                                      dtype=np.float16)
+            for i, poses in enumerate(pose_results):
+                for j, pose in enumerate(poses):
+                    pose = pose['keypoints']
+                    keypoint[j, i] = pose[:, :2]
+                    keypoint_score[j, i] = pose[:, 2]
+            fake_anno['keypoint'] = keypoint
+            fake_anno['keypoint_score'] = keypoint_score
 
-    action_label = label_map[results[0][0]]
+        output = inference_recognizer_person(model, fake_anno)
 
-    pose_model = init_pose_model(args.pose_config, args.pose_checkpoint,
-                                 args.device)
-    vis_frames = [
-        vis_pose_result(pose_model, frame_paths[i], pose_results[i])
-        for i in range(num_frame)
-    ]
-    for frame in vis_frames:
-        cv2.putText(frame, action_label, (10, 30), FONTFACE, FONTSCALE,
-                    FONTCOLOR, THICKNESS, LINETYPE)
+        person_label_name = []
 
-    vid = mpy.ImageSequenceClip([x[:, :, ::-1] for x in vis_frames], fps=24)
-    vid.write_videofile(args.out_filename, remove_temp=True)
+        for i, m in enumerate(output):
+            num_classes = m[0].shape[-1]
+            score_tuples = tuple(zip(range(num_classes), m[0]))
+            score_sorted = sorted(score_tuples, key=itemgetter(1), reverse=True)
 
-    tmp_frame_dir = osp.dirname(frame_paths[0])
-    shutil.rmtree(tmp_frame_dir)
+            person_label = m[0].argmax()
+            person_label_name.append(label_map[person_label])
+
+        pose_model = init_pose_model(args.pose_config, args.pose_checkpoint,
+                                     args.device)
+        vis_frames = [
+            vis_pose_result(pose_model, frame_paths[i], pose_results[i])
+            for i in range(num_frame)
+        ]
+
+        for frame in vis_frames:
+            h = 30
+            for i, p_label in enumerate(person_label_name):
+                h += 20
+                cv2.putText(frame, 'person' + str(i) + ': ' + p_label, (10, h), FONTFACE, FONTSCALE, FONTCOLOR,
+                            THICKNESS, LINETYPE)
+
+        vid = mpy.ImageSequenceClip([x[:, :, ::-1] for x in vis_frames], fps=24)
+        vid.write_videofile(args.out_filename+'{}_'.format(output_dir)+video_name+'.mp4', remove_temp=True)
+
+        tmp_frame_dir = osp.dirname(frame_paths[0])
+        shutil.rmtree(tmp_frame_dir)
 
 
 if __name__ == '__main__':

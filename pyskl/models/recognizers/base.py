@@ -44,6 +44,9 @@ class BaseRecognizer(nn.Module, metaclass=ABCMeta):
         self.backbone = builder.build_backbone(backbone)
         self.cls_head = builder.build_head(cls_head) if cls_head else None
 
+        # tjnet
+        self.person = False
+
         if train_cfg is None:
             train_cfg = dict()
         if test_cfg is None:

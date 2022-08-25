@@ -158,7 +158,7 @@ def main():
     config = mmcv.Config.fromfile(args.config)
     config.data.test.pipeline = [x for x in config.data.test.pipeline if x['type'] != 'DecompressPose']
     # Are we using GCN for Infernece?
-    GCN_flag = False #'GCN' in config.model.type
+    GCN_flag = 'GCN' in config.model.type #False #
     GCN_nperson = None
 
     # model load
@@ -204,12 +204,12 @@ def main():
                 total_frames=num_frame)
 
             tracking_inputs = []
+            for i in range(pose_results.size()):
+                tracking_inputs += [[]]
             if GCN_flag:
                 # We will keep at most `GCN_nperson` persons per frame.
-                for i in range(pose_results.size()):
-                    tracking_inputs += [[]]
                 format_op = [op for op in config.data.test.pipeline if op['type'] == 'FormatGCNInput'][0]
-                GCN_nperson = pose_results.max_len()  #2#pose_results.max_len()
+                GCN_nperson = pose_results.max_len() #2#pose_results.max_len()
 
                 for i in range(pose_results.size()):
                     poses = pose_results.value(i)

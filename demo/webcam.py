@@ -17,7 +17,7 @@ from scipy.optimize import linear_sum_assignment
 from pyskl.apis import inference_recognizer, init_recognizer
 
 try:
-    from mmdetection.mmdet.apis import inference_detector, init_detector #
+    from mmdet.apis import inference_detector, init_detector #
 except (ImportError, ModuleNotFoundError):
     def inference_detector(*args, **kwargs):
         pass
@@ -168,9 +168,6 @@ def main():
     # Are we using GCN for Infernece?
     GCN_flag = False #'GCN' in config.model.type
     GCN_nperson = None
-    #if GCN_flag:
-    #    format_op = [op for op in config.data.test.pipeline if op['type'] == 'FormatGCNInput'][0]
-    #    GCN_nperson = format_op['num_person']
 
     # model load
     model = init_recognizer(config, args.checkpoint, args.device)
@@ -191,12 +188,12 @@ def main():
     while(True):
         #get frame
         ret, frame_paths = video_capture.read()
-        '''
+
         if frame_paths is None:
             break
         if mirror:
             frame_paths = cv2.flip(frame_paths, 1)
-        '''
+
         h, w, _ = frame_paths.shape
 
         # Get clip_len, frame_interval and calculate center index of each clip
@@ -213,13 +210,6 @@ def main():
         det_results.enqueue(copy.copy(det_result))
         pose_results.enqueue(copy.copy(pose_result))
 
-        #if len(det_result)>0:
-        #    det_results.append(copy.copy(det_result))
-        #
-        #pose_results.append(copy.copy(pose_result))
-
-        #print(pose_results)
-        #if len(pose_results)>=num_frame:
         if det_results.size() >= num_frame:
             fake_anno = dict(
                 frame_dir='',
@@ -233,33 +223,7 @@ def main():
             tracking_inputs = []
             if GCN_flag:
                 # We will keep at most `GCN_nperson` persons per frame.
-                """
-                print(pose_results.size())
-                for i in range(pose_results.size()):
-                    poses = pose_results.value(i)
-                    print(poses)
-                    for j, pose in enumerate(poses):  # enumerate(poses):
-                        tracking_inputs += [pose['keypoints']]
-
-                keypoint, keypoint_score = pose_tracking(tracking_inputs, max_tracks=GCN_nperson)
-                fake_anno['keypoint'] = keypoint
-                fake_anno['keypoint_score'] = keypoint_score
-                """
-                ############################################################
-                #for poses in pose_results:
-                print(pose_results)
-                for poses in pose_results:
-                    print(poses)
-                    for pose in poses:
-                        if len(pose[0])>0:
-                            print(pose)
-                            a = dict(pose[0])
-                            print(a['keypoints'])
-                            #print(len(pose[0]['keypoints']))
-                            #print(np.array(pose).shape)
-                            tracking_inputs+=[a['keypoints']]
-                #tracking_inputs = [[pose['keypoints'] for pose in poses] for poses in pose_results]
-
+                tracking_inputs = [[pose['keypoints'] for pose in poses] for poses in pose_results]
                 keypoint, keypoint_score = pose_tracking(tracking_inputs, max_tracks=GCN_nperson)
                 fake_anno['keypoint'] = keypoint
                 fake_anno['keypoint_score'] = keypoint_score
@@ -281,12 +245,6 @@ def main():
 
             results = inference_recognizer(model, fake_anno) ##### model 확인하는 부분
             action_label = label_map[results[0][0]]
-            print(results)
-            #action_label2 = label_map[results[0,1]]
-            print(action_label)
-
-
-            ###########
 
             result_index=0
             result_max=results[0][1]
@@ -300,14 +258,10 @@ def main():
                 result_max = result3_score
                 result_index=2
 
-            action_label=label_map[results[result_index][0]]
-
-            ##########
-
+            action_label = label_map[results[result_index][0]]
 
             vis_frames = vis_pose_result(pose_model, frame_paths, pose_result)
             vis_frames = cv2.putText(vis_frames , action_label, (10, 30), FONTFACE, FONTSCALE, FONTCOLOR, THICKNESS, LINETYPE)
-            #vis_frames = cv2.putText(vis_frames, action_label2, (20, 30), FONTFACE, FONTSCALE, FONTCOLOR, THICKNESS, LINETYPE)
 
             cv2.namedWindow("ST-GCN by mmacation", flags=cv2.WINDOW_NORMAL)
             cv2.imshow("ST-GCN by mmacation", vis_frames)

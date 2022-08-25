@@ -308,10 +308,4 @@ def inference_recognizer_person(model, video, outputs=None, as_tensor=True, **kw
             output = model(return_loss=False, **data)
         returned_features = h.layer_outputs if outputs else None
 
-    #output = output[0]
-    #feature = feature[0]
-    #feature = torch.tensor(feature)
-    #intensity = (feature * feature).sum(dim=0) ** 0.5
-    #intensity = intensity.cpu().detach().numpy()
-
     return  output #, intensity, data_numpy,
