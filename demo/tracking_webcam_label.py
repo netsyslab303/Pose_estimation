@@ -18,16 +18,13 @@ from scipy.optimize import linear_sum_assignment
 from pyskl.apis import inference_recognizer, init_recognizer, inference_recognizer_person
 
 try:
-    from mmdet.apis import inference_detector, init_detector  #
+    from mmdet.apis import inference_detector, init_detector #
 except (ImportError, ModuleNotFoundError):
     def inference_detector(*args, **kwargs):
         pass
 
-
     def init_detector(*args, **kwargs):
         pass
-
-
     warnings.warn(
         'Failed to import `inference_detector` and `init_detector` from `mmdet.apis`. '
         'Make sure you can successfully import these if you want to use related features. '
@@ -94,8 +91,8 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-
 def detection_inference(args, model, frame_paths):
+
     assert model is not None, ('Failed to build the detection model. Check if you have installed mmcv-full properly. '
                                'Note that you should first install mmcv-full successfully, then install mmdet, mmpose. ')
     assert model.CLASSES[0] == 'person', 'We require you to use a detector trained on COCO'
@@ -106,6 +103,7 @@ def detection_inference(args, model, frame_paths):
 
 
 def pose_inference(args, model, frame_paths, det_results):
+
     # Align input format
     det_results = [dict(bbox=x) for x in list(det_results)]
     pose = inference_top_down_pose_model(model, frame_paths, det_results, format='xyxy')[0]
@@ -119,20 +117,20 @@ def dist_ske(ske1, ske2):
 
 
 def pose_tracking(pose_results, max_tracks=2, thre=30):
+    temp = copy.deepcopy(pose_results)
     tracks, num_tracks = [], 0
     num_joints = 17
+
     for idx, poses in enumerate(pose_results):
-        if len(poses) == 0:
-            continue
-        if num_joints is None:
-            num_joints = poses[0].shape[0]
+        # if num_joints is None:
+        #     num_joints = poses[0].shape[0]
         track_proposals = [t for t in tracks if t['data'][-1][0] > idx - thre]
         n, m = len(track_proposals), len(poses)
         scores = np.zeros((n, m))
 
         for i in range(n):
             for j in range(m):
-                scores[i][j] = dist_ske(track_proposals[i]['data'][-1][1], poses[j])
+                scores[i][j] = dist_ske(track_proposals[i]['data'][-1][1]['keypoints'], poses[j]['keypoints'])
 
         row, col = linear_sum_assignment(scores)
         for r, c in zip(row, col):
@@ -147,12 +145,25 @@ def pose_tracking(pose_results, max_tracks=2, thre=30):
                     tracks.append(new_track)
     tracks.sort(key=lambda x: -len(x['data']))
     result = np.zeros((max_tracks, len(pose_results), num_joints, 3), dtype=np.float16)
+    temp = [[] for _ in range(len(pose_results))]
     for i, track in enumerate(tracks[:max_tracks]):
         for item in track['data']:
-            idx, pose = item
-            result[i, idx] = pose
-    return result[..., :2], result[..., 2]
+            idx, bbox_pose = item
+            result[i, idx] = bbox_pose['keypoints']
+            temp[idx].append(bbox_pose)
+    return result[..., :2], result[..., 2], temp
 
+def render_person(frame, pose, label_sequence):
+    M = len(pose)
+    for m in range(M):
+        x1 = pose[m]['bbox'][0]
+        y1 = pose[m]['bbox'][1]
+
+        x, y = int(x1), int(y1 - 10)
+        frame = cv2.putText(frame, label_sequence[m], (x, y), FONTFACE, FONTSCALE, FONTCOLOR,
+                    THICKNESS, LINETYPE)
+
+    return frame
 
 def main():
     args = parse_args()
@@ -160,7 +171,7 @@ def main():
     config = mmcv.Config.fromfile(args.config)
     config.data.test.pipeline = [x for x in config.data.test.pipeline if x['type'] != 'DecompressPose']
     # Are we using GCN for Infernece?
-    GCN_flag = 'GCN' in config.model.type  # False #
+    GCN_flag = 'GCN' in config.model.type #False #
     GCN_nperson = None
 
     # model load
@@ -179,18 +190,17 @@ def main():
     det_results = circular.CircularQueue(num_frame)
     pose_results = circular.CircularQueue(num_frame)
 
-    while True:
-        # get frame
+    while(True):
+        #get frame
         ret, frame_paths = video_capture.read()
         h, w, _ = frame_paths.shape
 
         # Get clip_len, frame_interval and calculate center index of each clip
 
-        det_result = detection_inference(args, det_model, frame_paths)
-        det_result = sorted(det_result, key=lambda a_entry: a_entry[0])  # sort bbox
+        det_result = detection_inference(args,det_model, frame_paths)
         torch.cuda.empty_cache()
 
-        pose_result = pose_inference(args, pose_model, frame_paths, det_result)
+        pose_result = pose_inference(args, pose_model,frame_paths, det_result)
         torch.cuda.empty_cache()
 
         det_results.enqueue(copy.copy(det_result))
@@ -212,14 +222,11 @@ def main():
             if GCN_flag:
                 # We will keep at most `GCN_nperson` persons per frame.
                 format_op = [op for op in config.data.test.pipeline if op['type'] == 'FormatGCNInput'][0]
-                GCN_nperson = pose_results.max_len()  # 2#pose_results.max_len()
+                GCN_nperson = pose_results.max_len() #2#pose_results.max_len()
 
-                for i in range(pose_results.size()):
-                    poses = pose_results.value(i)
-                    for pose in poses:
-                        tracking_inputs[i].append(pose['keypoints'])
+                keypoint, keypoint_score, temp = pose_tracking(pose_results.data, max_tracks=GCN_nperson)
+                pose_results.data = copy.deepcopy(temp)
 
-                keypoint, keypoint_score = pose_tracking(tracking_inputs, max_tracks=GCN_nperson)
                 fake_anno['keypoint'] = keypoint
                 fake_anno['keypoint_score'] = keypoint_score
             else:
@@ -243,19 +250,15 @@ def main():
 
             for i, m in enumerate(output):
                 num_classes = m[0].shape[-1]
-                score_tuples = tuple(zip(range(num_classes), m[0]))
-                score_sorted = sorted(score_tuples, key=itemgetter(1), reverse=True)
+                # score_tuples = tuple(zip(range(num_classes),m[0]))
+                # score_sorted = sorted(score_tuples, key=itemgetter(1), reverse=True)
 
                 person_label = m[0].argmax()
                 person_label_name.append(label_map[person_label])
 
             h = 50
-            vis_frames = vis_pose_result(pose_model, frame_paths, pose_result)
-            for i, p_label in enumerate(person_label_name):
-                # voting_label_name = label_map[p_label]
-                h += 20
-                cv2.putText(vis_frames, 'person' + str(i) + ': ' + p_label, (10, h), FONTFACE, FONTSCALE, FONTCOLOR,
-                            THICKNESS, LINETYPE)
+            vis_frames = vis_pose_result(pose_model, frame_paths, pose_results.value(-1))
+            vis_frames = render_person(vis_frames,pose_results.value(-1),person_label_name)
 
             cv2.namedWindow("ST-GCN++", flags=cv2.WINDOW_NORMAL)
             cv2.imshow("ST-GCN++", vis_frames)
@@ -263,7 +266,6 @@ def main():
                 break
             det_results.dequeue()
             pose_results.dequeue()
-
 
 if __name__ == '__main__':
     main()
